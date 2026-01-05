@@ -4,6 +4,7 @@ const indexRouter = require('./routes/index');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+console.log("DEPLOY_CHECK:", new Date().toISOString());
 
 // Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
