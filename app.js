@@ -11,6 +11,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Use the router for handling routes
 app.use('/', indexRouter);
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'orchestrator',
+    commit: process.env.RAILWAY_GIT_COMMIT_SHA
+            || process.env.GITHUB_SHA
+            || 'no-sha',
+    time: new Date().toISOString()
+  });
+});
 
 // Catch-all route for handling 404 errors
 app.use((req, res, next) => {
