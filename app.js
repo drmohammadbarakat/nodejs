@@ -11,6 +11,29 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Use the router for handling routes
 app.use('/', indexRouter);
+app.get('/version', (req, res) => {
+  const commit = process.env.RAILWAY_GIT_COMMIT_SHA
+              || process.env.GITHUB_SHA
+              || 'no-sha';
+  const time = new Date().toISOString();
+
+  res.status(200).send(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Service Version</title>
+      </head>
+      <body style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 16px;">
+        <h1 style="margin: 0 0 12px 0;">orchestrator</h1>
+        <div><strong>commit:</strong> ${commit}</div>
+        <div><strong>time:</strong> ${time}</div>
+      </body>
+    </html>
+  `);
+});
+
 app.get('/health', (req, res) => {
   res.status(200).json({
     ok: true,
