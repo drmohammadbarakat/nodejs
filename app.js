@@ -40,3 +40,4 @@ app.get('/version', (req, res) => {
 
 /*
  * Step 3 — Machine-Readable Runtime Identity Endpoi*
+
