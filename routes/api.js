@@ -1,91 +1,55 @@
-/**
- * PromptFactor API Skeleton (Shape Only, No Intelligence Yet)
- *
- * Required endpoints:
- *   POST /api/orchestrate
- *   GET  /api/requests/:id
- *   GET  /api/health   (alias wrapper)
- *
- * Deterministic placeholders only.
- */
+// routes/api.js — Step 6 (Deterministic Request Persistence via Registry)
+
+"use strict";
 
 const express = require("express");
 const router = express.Router();
 
-/**
- * In-memory deterministic placeholder store.
- * Not durable. No intelligence. No execution.
- */
-const requestsById = new Map();
-let nextRequestId = 1;
+const requestRegistry = require("../lib/requestRegistry");
 
 /**
- * POST /api/orchestrate
- *
- * Deterministic placeholder:
- * - Accepts any JSON body
- * - Creates a request record
- * - Returns status=accepted only
+ * Step 5/6 — POST /api/orchestrate
+ * Shape-only response, but now persists deterministically in a shared registry.
  */
 router.post("/orchestrate", (req, res) => {
-  const id = String(nextRequestId++);
-
-  const record = {
-    id,
-    status: "accepted",
-    input: req.body || null,
-    output: null,
-    error: null,
-    runs: [],
-    artifacts: [],
-  };
-
-  requestsById.set(id, record);
+  const stored = requestRegistry.createRequest(req.body);
 
   return res.status(202).json({
     ok: true,
-    request: record,
+    request: {
+      id: stored.id,
+      status: stored.status,
+    },
   });
 });
 
 /**
- * GET /api/requests/:id
- *
- * Deterministic placeholder:
- * - Returns stored request record if present
- * - Returns 404 if missing
+ * Step 5/6 — GET /api/requests/:id
+ * Retrieves the stored request from the shared registry.
  */
 router.get("/requests/:id", (req, res) => {
-  const id = String(req.params.id);
+  const found = requestRegistry.getRequest(req.params.id);
 
-  if (!requestsById.has(id)) {
+  if (!found) {
     return res.status(404).json({
       ok: false,
-      error: {
-        code: "NOT_FOUND",
-        message: "Request not found",
-        requestId: id,
-      },
+      error: "not_found",
+      id: req.params.id,
     });
   }
 
   return res.status(200).json({
     ok: true,
-    request: requestsById.get(id),
+    request: found,
   });
 });
 
 /**
- * GET /api/health
- *
- * Alias wrapper:
- * - Forwards directly to the existing /health endpoint
- * - Does not redefine semantics
+ * Step 5 — GET /api/health aliases /health
  */
 router.get("/health", (req, res) => {
-  req.url = "/health";
-  req.app.handle(req, res);
+  // Redirect preserves existing Step 5 semantics without duplicating logic.
+  return res.redirect(302, "/health");
 });
 
 module.exports = router;
-
