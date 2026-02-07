@@ -1,4 +1,5 @@
 const express = require('express');
+const apiRouter = require("./routes/api");
 const path = require('path');
 const indexRouter = require('./routes/index');
 
@@ -8,6 +9,8 @@ console.log("DEPLOY_CHECK:", new Date().toISOString());
 
 // Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
+// Step 5 — PromptFactor API Skeleton (Shape Only)
+app.use("/api", apiRouter);
 
 // Use the router for handling routes
 app.use('/', indexRouter);
