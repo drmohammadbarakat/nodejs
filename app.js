@@ -1,27 +1,41 @@
-const express = require('express');
+// app.js (FULL CLEAN DETERMINISTIC COPY — replace the entire file with this)
+
+const express = require("express");
+const path = require("path");
+
+const indexRouter = require("./routes/index");
 const apiRouter = require("./routes/api");
-const path = require('path');
-const indexRouter = require('./routes/index');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Deterministic boot marker (log only; does not affect API responses)
 console.log("DEPLOY_CHECK:", new Date().toISOString());
 
-// Serve static files from the "public" directory
-app.use(express.static(path.join(__dirname, 'public')));
-// Step 5 — PromptFactor API Skeleton (Shape Only)
+// --- Core middleware (required for POST /api/orchestrate to accept JSON deterministically)
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// Static assets
+app.use(express.static(path.join(__dirname, "public")));
+
+// --- Step 5 — PromptFactor API Skeleton (Shape Only)
 app.use("/api", apiRouter);
 
-// Use the router for handling routes
-app.use('/', indexRouter);
+// Homepage contract: / → routes/index.js → views/index.html
+app.use("/", indexRouter);
 
 /*
  * Step 4 — Human-Readable Identity Endpoint
+ * GET /version (HTML)
  */
-app.get('/version', (req, res) => {
-  const commit = process.env.RAILWAY_GIT_COMMIT_SHA
-              || process.env.GITHUB_SHA
-              || 'no-sha';
+app.get("/version", (req, res) => {
+  const commit =
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+    process.env.GITHUB_SHA ||
+    process.env.DEPLOY_MARKER ||
+    "no-sha";
+
   const time = new Date().toISOString();
 
   res.status(200).send(`
@@ -42,5 +56,23 @@ app.get('/version', (req, res) => {
 });
 
 /*
- * Step 3 — Machine-Readable Runtime Identity Endpoi*
+ * Step 3 — Machine-Readable Runtime Identity Endpoint
+ * GET /health (JSON)
+ */
+app.get("/health", (req, res) => {
+  const commit =
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+    process.env.GITHUB_SHA ||
+    process.env.DEPLOY_MARKER ||
+    "no-sha";
 
+  res.status(200).json({
+    ok: true,
+    commit,
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
+});
