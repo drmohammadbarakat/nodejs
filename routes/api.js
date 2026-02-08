@@ -282,5 +282,68 @@ router.post("/requests/:id/transition", (req, res) => {
 router.get("/health", (req, res) => {
   return res.redirect(302, "/health");
 });
+// STEP 13 — Request Dry-Run Validation (Pre-Execution Gate)
+// Contract: POST /api/requests/dry-run
+// - Validates request shape without creating/mutating a Request
+// - Deterministic response (valid/checks/warnings/errors)
+// - No side effects (no registry/history writes)
+router.post('/requests/dry-run', (req, res) => {
+  const personaId = req.body?.personaId;
+  const input = req.body?.input;
+
+  const checks = [];
+  const warnings = [];
+  const errors = [];
+
+  // Contract: personaId required
+  if (!personaId || typeof personaId !== 'string') {
+    checks.push({ check: 'persona_id_present', status: 'fail' });
+    errors.push('persona_id_required');
+  } else {
+    checks.push({ check: 'persona_id_present', status: 'pass' });
+  }
+
+  // Contract: input required (opaque payload)
+  if (typeof input === 'undefined') {
+    checks.push({ check: 'input_present', status: 'fail' });
+    errors.push('input_required');
+  } else {
+    checks.push({ check: 'input_present', status: 'pass' });
+  }
+
+  // Contract: persona must exist (reuse existing persona registry if present)
+  // IMPORTANT: We only READ existing runtime structures; we do not create new ones.
+  let personaExists = false;
+  try {
+    // Common runtime placement is app.locals.personas (object map or array).
+    const personas = req.app?.locals?.personas;
+
+    if (personas) {
+      if (Array.isArray(personas)) {
+        personaExists = personas.some(p => p && p.id === personaId);
+      } else if (typeof personas === 'object') {
+        personaExists = Boolean(personas[personaId]);
+      }
+    }
+  } catch (_) {
+    // no-op
+  }
+
+  // Only run persona_exists check if personaId was structurally present
+  if (personaId && typeof personaId === 'string') {
+    checks.push({ check: 'persona_exists', status: personaExists ? 'pass' : 'fail' });
+    if (!personaExists) errors.push('persona_not_found');
+  }
+
+  const valid = errors.length === 0;
+
+  return res.status(valid ? 200 : 400).json({
+    valid,
+    personaId: personaId || null,
+    checks,
+    warnings,
+    errors
+  });
+});
 
 module.exports = router;
