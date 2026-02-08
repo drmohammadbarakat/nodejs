@@ -1,4 +1,4 @@
-// routes/api.js — Step 6 (Deterministic Request Persistence via Registry)
+// routes/api.js — Step 8 (Inspectable Request History Endpoint)
 
 "use strict";
 
@@ -8,8 +8,8 @@ const router = express.Router();
 const requestRegistry = require("../lib/requestRegistry");
 
 /**
- * Step 5/6 — POST /api/orchestrate
- * Shape-only response, but now persists deterministically in a shared registry.
+ * POST /api/orchestrate
+ * Shape-only response; persists request deterministically.
  */
 router.post("/orchestrate", (req, res) => {
   const stored = requestRegistry.createRequest(req.body);
@@ -24,8 +24,8 @@ router.post("/orchestrate", (req, res) => {
 });
 
 /**
- * Step 5/6 — GET /api/requests/:id
- * Retrieves the stored request from the shared registry.
+ * GET /api/requests/:id
+ * Retrieves stored request record.
  */
 router.get("/requests/:id", (req, res) => {
   const found = requestRegistry.getRequest(req.params.id);
@@ -45,10 +45,35 @@ router.get("/requests/:id", (req, res) => {
 });
 
 /**
- * Step 5 — GET /api/health aliases /health
+ * Step 8 — GET /api/requests/:id/history
+ * Inspectable request history (append-only audit-style event list).
+ *
+ * Contract:
+ * - 404 if request not found
+ * - 200 with { ok: true, id, history: [...] }
+ */
+router.get("/requests/:id/history", (req, res) => {
+  const found = requestRegistry.getRequest(req.params.id);
+
+  if (!found) {
+    return res.status(404).json({
+      ok: false,
+      error: "not_found",
+      id: req.params.id,
+    });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    id: found.id,
+    history: Array.isArray(found.timeline) ? found.timeline : [],
+  });
+});
+
+/**
+ * GET /api/health aliases /health
  */
 router.get("/health", (req, res) => {
-  // Redirect preserves existing Step 5 semantics without duplicating logic.
   return res.redirect(302, "/health");
 });
 
