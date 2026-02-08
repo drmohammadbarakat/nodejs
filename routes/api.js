@@ -1,4 +1,4 @@
-// routes/api.js — Step 12 (Persona Registry + Persona-Scoped Requests)
+// routes/api.js — Step 12 FIX (Persona Registry + Persona-Scoped Requests + History)
 
 "use strict";
 
@@ -9,7 +9,6 @@ const requestRegistry = require("../lib/requestRegistry");
 
 /**
  * Step 12 — Deterministic Persona Registry (runtime-scoped, no DB yet)
- * Minimal first-class persona definitions (extend later).
  */
 const PERSONAS = Object.freeze([
   Object.freeze({
@@ -25,19 +24,13 @@ function getPersonaById(id) {
   return PERSONAS.find((p) => p.id === id) || null;
 }
 
-function isoNow() {
-  return new Date().toISOString();
-}
-
 /**
- * Runtime-only index to support deterministic listing without requiring registry.list().
- * (Resets on restart — consistent with in-memory scope.)
+ * Deterministic listing index (runtime-only).
  */
 const createdIds = [];
 
 /**
  * Step 12 — GET /api/personas
- * Deterministic persona registry listing.
  */
 router.get("/personas", (req, res) => {
   return res.status(200).json({
@@ -49,7 +42,6 @@ router.get("/personas", (req, res) => {
 
 /**
  * Step 12 — GET /api/personas/:id
- * Deterministic persona retrieval.
  */
 router.get("/personas/:id", (req, res) => {
   const persona = getPersonaById(req.params.id);
@@ -69,19 +61,18 @@ router.get("/personas/:id", (req, res) => {
 });
 
 /**
- * POST /api/orchestrate
- * Now persona-scoped deterministically:
- * - Accepts optional personaId in JSON body.
- * - Defaults to "pf_default" if omitted.
- * - Rejects unknown personaId deterministically (400).
+ * POST /api/orchestrate (persona-scoped + idempotency-safe)
+ *
+ * IMPORTANT:
+ * requestRegistry.createRequest() (Step 11) expects { input, idempotencyKey }.
+ * If we pass the raw body directly, input becomes null.
  */
 router.post("/orchestrate", (req, res) => {
-  const body = req && req.body ? req.body : null;
+  const body = req && req.body ? req.body : {};
 
-  const personaId =
-    body && body.personaId ? String(body.personaId) : "pf_default";
-
+  const personaId = body.personaId ? String(body.personaId) : "pf_default";
   const persona = getPersonaById(personaId);
+
   if (!persona) {
     return res.status(400).json({
       ok: false,
@@ -91,21 +82,17 @@ router.post("/orchestrate", (req, res) => {
     });
   }
 
-  const stored = requestRegistry.createRequest(body);
+  // Idempotency key (optional)
+  const idempotencyKey = body.idempotencyKey ? String(body.idempotencyKey) : null;
 
-  // Persona-scoping: persist personaId inside the stored request object (inspectable).
-  stored.personaId = personaId;
+  // Store personaId inside input deterministically (since registry returns clones).
+  const input = { ...body, personaId };
 
-  // Emit an audit-style event in the request timeline (append-only).
-  if (!Array.isArray(stored.timeline)) stored.timeline = [];
-  stored.timeline.push({
-    from: null,
-    to: "persona_bound",
-    at: isoNow(),
-    personaId,
+  const stored = requestRegistry.createRequest({
+    input,
+    idempotencyKey,
   });
 
-  // Track for listing deterministically
   if (!createdIds.includes(stored.id)) createdIds.push(stored.id);
 
   return res.status(202).json({
@@ -113,14 +100,13 @@ router.post("/orchestrate", (req, res) => {
     request: {
       id: stored.id,
       status: stored.status,
-      personaId: stored.personaId,
+      personaId,
     },
   });
 });
 
 /**
- * GET /api/requests
- * Deterministic listing of summaries in creation order.
+ * GET /api/requests (summaries)
  */
 router.get("/requests", (req, res) => {
   const summaries = [];
@@ -129,11 +115,13 @@ router.get("/requests", (req, res) => {
     const r = requestRegistry.getRequest(id);
     if (!r) continue;
 
+    const personaId = r.input && r.input.personaId ? String(r.input.personaId) : null;
+
     summaries.push({
       id: r.id,
       status: r.status,
       createdAt: r.createdAt,
-      personaId: r.personaId || null,
+      personaId,
     });
   }
 
@@ -145,8 +133,7 @@ router.get("/requests", (req, res) => {
 });
 
 /**
- * GET /api/requests/:id
- * Retrieves stored request record.
+ * GET /api/requests/:id (full record)
  */
 router.get("/requests/:id", (req, res) => {
   const found = requestRegistry.getRequest(req.params.id);
@@ -159,59 +146,91 @@ router.get("/requests/:id", (req, res) => {
     });
   }
 
+  // Ensure personaId is inspectable (derived deterministically from stored input)
+  const personaId =
+    found.input && found.input.personaId ? String(found.input.personaId) : null;
+
   return res.status(200).json({
     ok: true,
-    request: found,
+    request: {
+      ...found,
+      personaId,
+    },
   });
 });
 
 /**
  * GET /api/requests/:id/history
- * Inspectable request history (timeline).
+ *
+ * Registry stores lifecycle history as "history".
+ * Step 12 requires an inspectable "persona_bound" event.
+ *
+ * We return:
+ * - the registry history events
+ * - plus a deterministic persona_bound event if personaId exists
+ *   (placed immediately after the accepted event)
  */
 router.get("/requests/:id/history", (req, res) => {
   const found = requestRegistry.getRequest(req.params.id);
-
   if (!found) {
     return res.status(404).json({
       ok: false,
       error: "not_found",
       id: req.params.id,
     });
+  }
+
+  const base = requestRegistry.getHistory(found.id);
+  if (base === null) {
+    return res.status(404).json({
+      ok: false,
+      error: "not_found",
+      id: found.id,
+    });
+  }
+
+  const personaId =
+    found.input && found.input.personaId ? String(found.input.personaId) : null;
+
+  // Deterministic persona-bound event time: use createdAt
+  const personaEvent =
+    personaId
+      ? {
+          from: null,
+          to: "persona_bound",
+          at: found.createdAt,
+          personaId,
+        }
+      : null;
+
+  let history = Array.isArray(base) ? base.slice() : [];
+
+  // Insert persona event once, right after the initial accepted event
+  if (personaEvent) {
+    const already = history.some((e) => e && e.to === "persona_bound");
+    if (!already) {
+      if (history.length >= 1) {
+        history.splice(1, 0, personaEvent);
+      } else {
+        history.push(personaEvent);
+      }
+    }
   }
 
   return res.status(200).json({
     ok: true,
     id: found.id,
-    history: Array.isArray(found.timeline) ? found.timeline : [],
+    history,
   });
 });
 
 /**
  * POST /api/requests/:id/transition
- * Deterministic lifecycle transitions (from Step 10.2).
+ * Use registry transition (persisted deterministically + adds to history).
  */
-const ALLOWED_TRANSITIONS = Object.freeze({
-  accepted: Object.freeze(["pending", "cancelled"]),
-  pending: Object.freeze(["running", "cancelled"]),
-  running: Object.freeze(["succeeded", "failed", "cancelled"]),
-  succeeded: Object.freeze([]),
-  failed: Object.freeze([]),
-  cancelled: Object.freeze([]),
-});
-
 router.post("/requests/:id/transition", (req, res) => {
-  const found = requestRegistry.getRequest(req.params.id);
-
-  if (!found) {
-    return res.status(404).json({
-      ok: false,
-      error: "not_found",
-      id: req.params.id,
-    });
-  }
-
   const to = req && req.body && req.body.to ? String(req.body.to) : "";
+
   if (!to) {
     return res.status(400).json({
       ok: false,
@@ -220,32 +239,39 @@ router.post("/requests/:id/transition", (req, res) => {
     });
   }
 
-  const from = String(found.status || "");
-  const allowed = ALLOWED_TRANSITIONS[from] || [];
+  const result = requestRegistry.transitionRequest(req.params.id, to);
 
-  if (!allowed.includes(to)) {
-    return res.status(400).json({
+  if (!result.ok && result.error === "not_found") {
+    return res.status(404).json({
       ok: false,
-      error: "invalid_transition",
-      id: found.id,
-      from,
-      to,
-      allowed,
+      error: "not_found",
+      id: req.params.id,
     });
   }
 
-  const at = isoNow();
-  found.status = to;
+  if (!result.ok && result.error === "invalid_transition") {
+    return res.status(400).json({
+      ok: false,
+      error: "invalid_transition",
+      id: result.id,
+      from: result.from,
+      to: result.to,
+      allowed: result.allowed,
+    });
+  }
 
-  if (!Array.isArray(found.timeline)) found.timeline = [];
-  found.timeline.push({ from, to, at });
+  // Expose personaId deterministically
+  const personaId =
+    result.request.input && result.request.input.personaId
+      ? String(result.request.input.personaId)
+      : null;
 
   return res.status(200).json({
     ok: true,
     request: {
-      id: found.id,
-      status: found.status,
-      personaId: found.personaId || null,
+      id: result.request.id,
+      status: result.request.status,
+      personaId,
     },
   });
 });
