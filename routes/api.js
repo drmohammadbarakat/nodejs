@@ -24,6 +24,28 @@ router.post("/orchestrate", (req, res) => {
 });
 
 /**
+ /*
+ * Step 9 — Request Listing (Deterministic)
+ * GET /api/requests
+ */
+router.get("/requests", (req, res) => {
+  const requests = requestRegistry.listRequests();
+
+  // Return summaries only (shape locked; avoids leaking full payload later)
+  const summaries = requests.map((r) => ({
+    id: r.id,
+    status: r.status,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  }));
+
+  res.status(200).json({
+    ok: true,
+    count: summaries.length,
+    requests: summaries,
+  });
+});
+
  * GET /api/requests/:id
  * Retrieves stored request record.
  */
